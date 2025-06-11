@@ -8,6 +8,7 @@ export const initialSites: WordPressSite[] = [
     rssFeedUrl: 'https://www.minuto24.com/feed/',
     facebookPageId: 'fb-minuto24',
     facebookPageName: 'Minuto24 Oficial',
+    facebookPageAccessToken: 'mock-access-token-for-minuto24-initial-testing', // Mock token
     status: 'monitoring',
     lastChecked: new Date().toISOString(),
   },

@@ -5,6 +5,7 @@ export interface WordPressSite {
   rssFeedUrl: string;
   facebookPageId?: string; // ID of the connected Facebook Page
   facebookPageName?: string; // Name of the connected Facebook Page for display
+  facebookPageAccessToken?: string; // Access token for posting to the Facebook Page
   status: 'monitoring' | 'paused' | 'error';
   lastChecked?: string; // ISO date string
   errorMessage?: string;
