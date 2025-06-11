@@ -20,7 +20,7 @@ export function AppSidebar({ className }: AppSidebarProps) {
         <div className="flex h-16 items-center border-b px-6">
           <Link href="/dashboard" className="flex items-center gap-2 font-semibold font-headline">
             <Rss className="h-6 w-6 text-primary" />
-            <span>Social Streamer</span>
+            <span>Social Streamer Grupo Argentino</span>
           </Link>
         </div>
         <div className="flex-1 overflow-auto py-2">
