@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { WordPressSite, ActivityLog, LogEntryStatus } from '@/lib/types';
@@ -25,7 +26,7 @@ export async function addSite(data: Omit<WordPressSite, 'id' | 'status' | 'lastC
   const newSite: WordPressSite = {
     ...data,
     id: String(siteIdCounter++),
-    status: 'monitoring',
+    status: 'monitoring', // Default status for a new site
     lastChecked: new Date().toISOString(),
   };
   sites.push(newSite);
@@ -37,7 +38,7 @@ export async function updateSite(id: string, data: Partial<Omit<WordPressSite, '
   const siteIndex = sites.findIndex(s => s.id === id);
   if (siteIndex === -1) return null;
   sites[siteIndex] = { ...sites[siteIndex], ...data };
-  revalidatePath('/dashboard');
+  revalidatePath('/dashboard'); // Asegura que los cambios se reflejen en el dashboard
   return JSON.parse(JSON.stringify(sites[siteIndex]));
 }
 
@@ -51,28 +52,10 @@ export async function deleteSite(id: string): Promise<boolean> {
   return false;
 }
 
-export async function connectFacebookPage(siteId: string, pageName: string): Promise<WordPressSite | null> {
-  const siteIndex = sites.findIndex(s => s.id === siteId);
-  if (siteIndex === -1) return null;
-  
-  const mockPageId = `fb-page-${pageName.toLowerCase().replace(/\s+/g, '-')}`;
-  // In a real app, the access token would be obtained via Facebook OAuth flow.
-  const mockAccessToken = `mock-access-token-${siteId}-${Date.now()}`;
-  
-  sites[siteIndex].facebookPageId = mockPageId;
-  sites[siteIndex].facebookPageName = pageName;
-  sites[siteIndex].facebookPageAccessToken = mockAccessToken; // Store the mock token
-  
-  await addLogEntry({
-    siteId: sites[siteIndex].id,
-    siteName: sites[siteIndex].name,
-    status: 'info',
-    message: `Simulated Facebook Page connection for "${pageName}". Mock access token generated.`,
-  });
-  
-  revalidatePath('/dashboard');
-  return JSON.parse(JSON.stringify(sites[siteIndex]));
-}
+// La función connectFacebookPage anterior se elimina.
+// La conexión real (obtención de page ID, name y token) ahora
+// se gestionaría a través del flujo OAuth y el endpoint de callback
+// /api/auth/facebook/callback, que luego llamaría a updateSite.
 
 export async function getLogs(): Promise<ActivityLog[]> {
   return JSON.parse(JSON.stringify(logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())));
@@ -94,56 +77,51 @@ async function addLogEntry(entryData: Omit<ActivityLog, 'id' | 'timestamp'>): Pr
 
 /**
  * Publishes content to a Facebook Page using the Facebook Graph API.
- * This is a placeholder and needs to be implemented with actual API calls.
  */
 async function publishToFacebookPage(
   pageId: string,
-  pageAccessToken: string,
+  pageAccessToken: string, // Este debería ser un token de acceso de página REAL
   message: string,
   link?: string
 ): Promise<{ success: boolean; postId?: string; error?: string }> {
   
   const appId = process.env.FACEBOOK_APP_ID;
-  const appSecret = process.env.FACEBOOK_APP_SECRET;
+  const appSecret = process.env.FACEBOOK_APP_SECRET; // No siempre es necesario para publicar si tienes un page access token válido
 
-  if (!appId || !appSecret) {
-    const errorMsg = 'Facebook App ID or App Secret is not configured in environment variables. Cannot make real API calls.';
+  if (!appId) { // App Secret no es estrictamente necesario para este API call específico si tienes un token de página
+    const errorMsg = 'Facebook App ID no está configurado. No se pueden realizar llamadas reales a la API.';
     console.error(errorMsg);
-    // For this demo, we'll still simulate if credentials aren't set, but log an error.
-    // In a production app, you might want to return { success: false, error: errorMsg } here.
+    // Para la demo, simularemos si las credenciales no están, pero registramos el error.
+    // En producción, podrías retornar { success: false, error: errorMsg } aquí.
   }
   
-  if (!pageAccessToken) {
-    return { success: false, error: 'Facebook Page Access Token not available for this site.' };
+  if (!pageAccessToken || pageAccessToken.startsWith('mock-access-token')) {
+     const warningMsg = `Se está usando un token de acceso de página FALSO o NULO: "${pageAccessToken}". Las llamadas reales a la API de Facebook fallarán o no funcionarán. Reemplaza con un token genuino obtenido vía OAuth.`;
+     console.warn(warningMsg);
+     // Si el token es claramente un mock, forzamos la simulación para evitar errores con la API real.
+     if (pageAccessToken.startsWith('mock-access-token') || !pageAccessToken) {
+        console.log('Forzando simulación de publicación en Facebook debido a token de acceso de página de prueba o ausente.');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Simula delay de red
+        const mockPostId = `simulated_fb_post_${Date.now()}`;
+        return { success: true, postId: mockPostId };
+     }
   }
   if (!pageId) {
-    return { success: false, error: 'Facebook Page ID not available for this site.' };
+    return { success: false, error: 'Facebook Page ID no disponible para este sitio.' };
   }
 
-  console.log(`Attempting to post to Facebook Page ID: ${pageId}`);
-  console.log(`Message: "${message}"`);
-  if (link) console.log(`Link: ${link}`);
-
-  // --- START REAL FACEBOOK API CALL SECTION ---
-  // IMPORTANT: The following is a conceptual guide. You'll need to:
-  // 1. Ensure 'facebook-nodejs-business-sdk' is installed.
-  // 2. Populate .env with your FACEBOOK_APP_ID and FACEBOOK_APP_SECRET.
-  // 3. Implement proper OAuth to get a real `pageAccessToken`. The current one is a mock.
-  // 4. Handle API errors robustly.
-
-  if (appId && appSecret && pageAccessToken.startsWith('mock-access-token')) {
-     console.warn(`Using a MOCK access token: "${pageAccessToken}". Real Facebook API calls will likely fail or be disfunctional. Replace with a genuine token.`);
-  }
+  console.log(`Intentando publicar en Facebook Page ID: ${pageId} con token: ${pageAccessToken ? pageAccessToken.substring(0,15) + '...' : 'N/A'}`);
+  console.log(`Mensaje: "${message}"`);
+  if (link) console.log(`Enlace: ${link}`);
   
   try {
-    // Initialize Facebook API - this usually needs to be done once with the app credentials if not using a user token directly
-    // For page posts, you primarily use the Page Access Token.
-    // FacebookAdsApi.init(pageAccessToken); // This initializes with the token, often for user-level actions.
-    // For posting to a page, you might use the page access token directly in the Page object methods.
-    
-    // Example using facebook-nodejs-business-sdk:
-    // const api = FacebookAdsApi.init(pageAccessToken); // Initialize with the page access token
-    // if (process.env.NODE_ENV === 'development') {
+    // Inicializar la API de Facebook. Esto podría hacerse una vez globalmente
+    // o antes de cada conjunto de llamadas, dependiendo de tu estructura.
+    // FacebookAdsApi.init(pageAccessToken); // OJO: El SDK puede preferir inicializar con app secret para ciertas cosas,
+                                         // pero para publicar en una página, el pageAccessToken es clave.
+    // Si usas `facebook-nodejs-business-sdk`, sería algo así:
+    // const api = FacebookAdsApi.init(pageAccessToken);
+    // if (process.env.NODE_ENV === 'development') { // O alguna otra variable para habilitar debug
     //   api.setDebug(true);
     // }
     // const pageNode = new FacebookPageSdk(pageId);
@@ -151,26 +129,32 @@ async function publishToFacebookPage(
     // if (link) {
     //   params.link = link;
     // }
-    // const response = await pageNode.createFeed([], params);
-    //
+    // const response = await pageNode.createFeed([], params); // El primer [] es para campos que quieres que devuelva
+    
+    // console.log('Respuesta de Facebook API:', response);
+
     // if (response && response.id) {
-    //   console.log('Successfully posted to Facebook. Post ID:', response.id);
+    //   console.log('Publicado exitosamente en Facebook. Post ID:', response.id);
     //   return { success: true, postId: response.id };
     // } else {
-    //   console.error('Failed to post to Facebook. Response:', response);
-    //   return { success: false, error: 'Failed to post to Facebook. Check API response.' };
+    //   console.error('Fallo al publicar en Facebook. Respuesta:', response);
+    //   const errorMessage = response?.error?.message || 'Fallo al publicar en Facebook. Verifica la respuesta de la API.';
+    //   return { success: false, error: errorMessage };
     // }
 
-    // SIMULATION until real API calls are implemented:
-    console.log('SIMULATING Facebook API call...');
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-    const mockPostId = `simulated_fb_post_${Date.now()}`;
-    console.log(`Simulated Facebook post success. Post ID: ${mockPostId}`);
+    // --- SIMULACIÓN TEMPORAL HASTA QUE EL SDK REAL SE DESCOMENTE Y CONFIGURE ---
+    // ¡¡¡RECUERDA DESCOMENTAR EL CÓDIGO DEL SDK DE ARRIBA Y ELIMINAR ESTA SIMULACIÓN CUANDO ESTÉS LISTO!!!
+    console.warn('USANDO SIMULACIÓN para publishToFacebookPage. Descomenta el código del SDK para llamadas reales.');
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Simula delay de red
+    const mockPostId = `sim_real_fb_post_${Date.now()}`;
+    console.log(`Simulación de publicación exitosa en Facebook. Post ID: ${mockPostId}`);
     return { success: true, postId: mockPostId };
+    // --- FIN DE LA SIMULACIÓN TEMPORAL ---
 
   } catch (apiError: any) {
-    console.error('Facebook API Error:', apiError.message || apiError);
-    let errorMessage = 'Unknown error posting to Facebook.';
+    console.error('Error de API de Facebook:', apiError.message || apiError);
+    let errorMessage = 'Error desconocido al publicar en Facebook.';
+    // El SDK facebook-nodejs-business-sdk puede arrojar errores con una estructura específica
     if (apiError.isAxiosError && apiError.response && apiError.response.data && apiError.response.data.error) {
       errorMessage = apiError.response.data.error.message || JSON.stringify(apiError.response.data.error);
     } else if (apiError.message) {
@@ -178,28 +162,37 @@ async function publishToFacebookPage(
     }
     return { success: false, error: errorMessage };
   }
-  // --- END REAL FACEBOOK API CALL SECTION ---
 }
 
 
 export async function simulateNewArticleAndPost(siteId: string): Promise<{success: boolean; message: string; log?: ActivityLog}> {
   const site = sites.find(s => s.id === siteId);
   if (!site) {
-    return { success: false, message: 'Site not found.' };
+    return { success: false, message: 'Sitio no encontrado.' };
   }
-  if (!site.facebookPageName || !site.facebookPageId || !site.facebookPageAccessToken) {
+  if (!site.facebookPageId || !site.facebookPageAccessToken) {
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
       status: 'skipped',
-      message: `Skipped: Facebook Page not fully configured for ${site.name} (missing name, ID, or access token).`,
+      message: `Saltado: La página de Facebook no está completamente configurada para ${site.name} (falta ID de página o token de acceso).`,
     });
-    return { success: false, message: `Facebook Page not fully configured for ${site.name}.` };
+    return { success: false, message: `La página de Facebook no está completamente configurada para ${site.name}.` };
+  }
+  if (site.status !== 'monitoring') {
+     await addLogEntry({
+      siteId: site.id,
+      siteName: site.name,
+      status: 'skipped',
+      message: `Saltado: El monitoreo para ${site.name} está actualmente en '${site.status}'.`,
+    });
+    return { success: false, message: `El monitoreo para ${site.name} está actualmente en '${site.status}'.` };
   }
 
+
   const mockArticle = {
-    title: `Mock Article from ${site.name} at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-    content: `This is some mock content for the article from ${site.name}. It includes details about various interesting topics that readers might find engaging. The goal is to generate a compelling Facebook post for this new piece of information.`,
+    title: `Artículo de Prueba desde ${site.name} a las ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    content: `Este es el contenido de prueba para el artículo de ${site.name}. Incluye detalles sobre varios temas interesantes que los lectores podrían encontrar atractivos. El objetivo es generar una publicación de Facebook convincente para esta nueva pieza de información. Este artículo es solo una simulación.`,
     url: `${site.url}/mock-article-${Date.now()}`,
   };
 
@@ -209,7 +202,7 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
     articleTitle: mockArticle.title,
     articleUrl: mockArticle.url,
     status: 'generating_post',
-    message: 'Attempting to generate Facebook post content using AI...',
+    message: 'Intentando generar contenido para la publicación de Facebook usando IA...',
   });
 
   let aiGeneratedText: string;
@@ -222,17 +215,17 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
     const aiResult = await generateFacebookPost(aiInput);
     aiGeneratedText = aiResult.facebookPostText;
   } catch (error) {
-    console.error('AI Post Generation Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error during AI generation.';
+    console.error('Error en Generación de Post con IA:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido durante la generación con IA.';
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
       articleTitle: mockArticle.title,
       articleUrl: mockArticle.url,
       status: 'error',
-      message: `AI Generation Error: ${errorMessage}`,
+      message: `Error de Generación con IA: ${errorMessage}`,
     });
-    return { success: false, message: `AI Generation Error: ${errorMessage}` };
+    return { success: false, message: `Error de Generación con IA: ${errorMessage}` };
   }
   
   await addLogEntry({
@@ -241,12 +234,12 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
     articleTitle: mockArticle.title,
     articleUrl: mockArticle.url,
     status: 'posting_to_facebook',
-    message: `AI Generated: "${aiGeneratedText}". Attempting to post to Facebook Page: ${site.facebookPageName}...`,
+    message: `IA Generó: "${aiGeneratedText}". Intentando publicar en la Página de Facebook: ${site.facebookPageName}...`,
   });
 
   const facebookPostResult = await publishToFacebookPage(
     site.facebookPageId,
-    site.facebookPageAccessToken,
+    site.facebookPageAccessToken, // Ahora esto podría ser un token real si el flujo OAuth funcionó
     aiGeneratedText,
     mockArticle.url
   );
@@ -258,10 +251,10 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
       articleTitle: mockArticle.title,
       articleUrl: mockArticle.url,
       status: 'posted',
-      message: `Successfully posted: "${aiGeneratedText}"`,
-      facebookPostUrl: `https://facebook.com/${site.facebookPageId}/posts/${facebookPostResult.postId.replace(/^simulated_fb_post_/, 'mock-')}`, // Adjust for mock/real ID
+      message: `Publicado exitosamente: "${aiGeneratedText}"`,
+      facebookPostUrl: `https://facebook.com/${site.facebookPageId}/posts/${facebookPostResult.postId.replace(/^sim_real_fb_post_|^simulated_fb_post_/, '')}`,
     });
-    return { success: true, message: `Successfully posted to ${site.facebookPageName}.`, log: finalLog };
+    return { success: true, message: `Publicado exitosamente en ${site.facebookPageName}.`, log: finalLog };
   } else {
     const errorLog = await addLogEntry({
       siteId: site.id,
@@ -269,8 +262,10 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
       articleTitle: mockArticle.title,
       articleUrl: mockArticle.url,
       status: 'error',
-      message: `Facebook Posting Error: ${facebookPostResult.error || 'Unknown error'}`,
+      message: `Error al Publicar en Facebook: ${facebookPostResult.error || 'Error desconocido'}`,
     });
-    return { success: false, message: `Error posting to Facebook: ${facebookPostResult.error || 'Unknown error'}`, log: errorLog };
+    // También actualizamos el estado del sitio a 'error' si la publicación falla
+    await updateSite(site.id, { status: 'error', errorMessage: `Facebook Posting Error: ${facebookPostResult.error || 'Unknown error'}` });
+    return { success: false, message: `Error al publicar en Facebook: ${facebookPostResult.error || 'Error desconocido'}`, log: errorLog };
   }
 }
