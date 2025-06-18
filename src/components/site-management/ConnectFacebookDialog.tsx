@@ -15,31 +15,23 @@ import {
 import type { WordPressSite } from "@/lib/types";
 import React, { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import Link from "next/link";
+// No se importa Link de next/link
 
 interface ConnectFacebookDialogProps {
   site: WordPressSite;
   children: React.ReactNode;
-  onFacebookPageConnected?: () => void; // Callback para refrescar UI si es necesario
+  onFacebookPageConnected?: () => void; 
 }
 
 export function ConnectFacebookDialog({ site, children, onFacebookPageConnected }: ConnectFacebookDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
 
-  // El manejo del éxito/error ahora ocurriría después del flujo de redirección de OAuth
-  // y la actualización del estado se haría en la página principal o a través de `onFacebookPageConnected`.
-
   const handleConnectClick = () => {
-    // Aquí, en una implementación completa, podrías querer hacer alguna preparación
-    // o validación antes de redirigir.
-    // Por ahora, el Link se encarga de la navegación.
-    // Cerramos el diálogo ya que el usuario será redirigido.
-    // Idealmente, el estado de carga o de "conectando" se manejaría de forma más robusta.
     toast({ title: "Redirigiendo a Facebook...", description: "Por favor, autoriza la aplicación en Facebook." });
-    // No cerramos el diálogo inmediatamente para que el toast sea visible.
-    // El cierre ocurrirá por la navegación o el usuario podría cerrarlo.
-    // setIsOpen(false); // Comentado para que el toast se vea brevemente
+    // La navegación real será manejada por la etiqueta <a>.
+    // Es posible que no necesitemos cerrar el diálogo aquí, ya que la página navegará.
+    // setIsOpen(false); 
   };
 
   return (
@@ -57,14 +49,25 @@ export function ConnectFacebookDialog({ site, children, onFacebookPageConnected 
           <DialogClose asChild>
             <Button type="button" variant="outline">Cancelar</Button>
           </DialogClose>
-          {/* El Link inicia el flujo OAuth. Pasa el siteId para saber a qué sitio asociar la conexión. */}
-          <Button asChild onClick={handleConnectClick}>
-            <Link href={`/api/auth/facebook/connect?siteId=${site.id}`}>
-              Continuar a Facebook
-            </Link>
-          </Button>
+          {/* 
+            Usando una etiqueta <a> estándar para el botón "Continuar a Facebook".
+            Esto asegura una navegación completa del navegador a la ruta API,
+            que luego realiza una redirección del lado del servidor a Facebook.
+            Esto evita problemas de CORS que pueden ocurrir si Next.js <Link>
+            intenta obtener el contenido de la ruta API directamente.
+            Se aplican clases de Tailwind para que se vea como un botón.
+          */}
+          <a 
+            href={`/api/auth/facebook/connect?siteId=${site.id}`}
+            onClick={handleConnectClick}
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+            // No es necesario asChild aquí porque <a> es el elemento final.
+          >
+            Continuar a Facebook
+          </a>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
