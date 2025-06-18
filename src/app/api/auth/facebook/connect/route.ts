@@ -10,43 +10,48 @@ export async function GET(request: NextRequest) {
   const siteId = searchParams.get('siteId');
 
   if (!siteId) {
-    // Idealmente, redirigir al dashboard con un mensaje de error
-    return redirect('/dashboard?error=missing_site_id_for_facebook_connect');
+    console.error('[CONNECT_FB] Error: Falta siteId para conectar Facebook.');
+    return redirect('/dashboard?error=missing_site_id_for_facebook_connect&message=ID_del_sitio_requerido_para_conectar_con_Facebook.');
   }
 
   const facebookAppId = process.env.FACEBOOK_APP_ID;
-  // Usamos la FACEBOOK_REDIRECT_URI del .env que ya está configurada para el dominio real o localhost
   const redirectUri = process.env.FACEBOOK_REDIRECT_URI;
 
+  console.log(`[CONNECT_FB] Iniciando conexión para siteId: ${siteId}`);
+  console.log(`[CONNECT_FB] FACEBOOK_APP_ID: ${facebookAppId ? 'Cargado' : 'NO CARGADO'}`);
+  console.log(`[CONNECT_FB] FACEBOOK_REDIRECT_URI: ${redirectUri ? redirectUri : 'NO CARGADO'}`);
+
+
   if (!facebookAppId || !redirectUri) {
-    console.error('FACEBOOK_APP_ID o FACEBOOK_REDIRECT_URI no están configurados en .env');
-    return redirect('/dashboard?error=facebook_config_missing_in_env');
+    console.error('[CONNECT_FB] Error: FACEBOOK_APP_ID o FACEBOOK_REDIRECT_URI no están configurados en .env');
+    return redirect('/dashboard?error=facebook_config_missing_in_env&message=Configuracion_de_Facebook_incompleta_en_el_servidor.');
   }
 
   // Generar un token CSRF
   const csrfToken = crypto.randomBytes(32).toString('hex');
 
   // Guardar el token CSRF en una cookie httpOnly y segura
-  // La cookie expirará en 10 minutos, que debería ser suficiente para el flujo de OAuth.
   cookies().set('facebook_csrf_token', csrfToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Usar 'secure' en producción (HTTPS)
-    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/', // Asegurarse que la cookie esté disponible en /api/auth/facebook/callback
     maxAge: 10 * 60, // 10 minutos en segundos
-    sameSite: 'lax', // 'lax' es un buen equilibrio para flujos de redirección OAuth
+    sameSite: 'lax',
   });
+  console.log('[CONNECT_FB] Token CSRF generado y cookie configurada.');
 
   const stateObject = {
     siteId: siteId,
-    csrfToken: csrfToken, // Incluir el token CSRF en el estado
+    csrfToken: csrfToken,
   };
   const state = encodeURIComponent(JSON.stringify(stateObject));
 
-  // Permisos necesarios para listar páginas, publicar en ellas y leer interacciones.
+  // Permisos necesarios. `pages_manage_post` ahora es `pages_manage_posts`
   const scope = 'pages_show_list,pages_manage_posts,pages_read_engagement';
 
-  const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${facebookAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}&response_type=code`;
-
-  // Redirigir al usuario a la URL de autorización de Facebook
+  const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${facebookAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}&response_type=code&display=popup`;
+  
+  console.log(`[CONNECT_FB] Redirigiendo a URL de autorización de Facebook: ${authUrl.substring(0, authUrl.indexOf('client_secret=') === -1 ? authUrl.length : authUrl.indexOf('client_secret='))}...`);
   return redirect(authUrl);
 }
+
