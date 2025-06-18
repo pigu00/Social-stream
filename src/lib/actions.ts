@@ -75,42 +75,44 @@ async function addLogEntry(entryData: Omit<ActivityLog, 'id' | 'timestamp'>): Pr
 /**
  * Publishes content to a Facebook Page using the Facebook Graph API.
  * Attempts to use the facebook-nodejs-business-sdk if a real pageAccessToken is provided.
- * Falls back to simulation if the token is a mock token or missing.
+ * Falls back to simulation if the token is a mock token or missing, or if FACEBOOK_APP_ID is not set.
  */
 async function publishToFacebookPage(
-  site: WordPressSite, // Pass the whole site object for easier access to facebookPageId and token
+  site: WordPressSite,
   message: string,
   link?: string
 ): Promise<{ success: boolean; postId?: string; error?: string }> {
   
-  const { facebookPageId, facebookPageAccessToken } = site;
+  const { facebookPageId, facebookPageAccessToken, name: siteName } = site;
   const appId = process.env.FACEBOOK_APP_ID;
 
+  console.log(`[publishToFacebookPage for "${siteName}"] Iniciando proceso de publicación.`);
+
   if (!appId) {
-    const errorMsg = 'Facebook App ID (FACEBOOK_APP_ID) no está configurado en las variables de entorno. No se pueden realizar llamadas reales a la API.';
-    console.error(errorMsg);
-    console.log('Forzando simulación de publicación en Facebook debido a FACEBOOK_APP_ID ausente.');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const errorMsg = `[publishToFacebookPage for "${siteName}"] FACEBOOK_APP_ID no está configurado. Forzando simulación.`;
+    console.warn(errorMsg);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate delay
     const mockPostId = `simulated_fb_post_appid_missing_${Date.now()}`;
     return { success: true, postId: mockPostId };
   }
   
   if (!facebookPageId || !facebookPageAccessToken || facebookPageAccessToken.startsWith('mock-access-token')) {
-     const warningMsg = `Token de acceso de página de Facebook es de prueba, nulo o el ID de página falta. Token: "${facebookPageAccessToken ? facebookPageAccessToken.substring(0,15)+'...' : 'N/A'}", Page ID: "${facebookPageId}". Se procederá con simulación.`;
+     const reason = !facebookPageId ? "Falta Page ID" : !facebookPageAccessToken ? "Falta Page Access Token" : "Usando mock Page Access Token";
+     const warningMsg = `[publishToFacebookPage for "${siteName}"] ${reason}. Token: "${facebookPageAccessToken ? facebookPageAccessToken.substring(0,10)+'...' : 'N/A'}", Page ID: "${facebookPageId}". Procediendo con simulación.`;
      console.warn(warningMsg);
-     await new Promise(resolve => setTimeout(resolve, 1500)); 
+     await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate delay
      const mockPostId = `simulated_fb_post_mock_token_${Date.now()}`;
      return { success: true, postId: mockPostId };
   }
 
-  console.log(`Intentando publicar en Facebook Page ID: ${facebookPageId} con token REAL (primeros 15 chars): ${facebookPageAccessToken.substring(0,15)}...`);
+  console.log(`[publishToFacebookPage for "${siteName}"] Intentando publicación REAL en Facebook Page ID: ${facebookPageId} con token (primeros 10 chars): ${facebookPageAccessToken.substring(0,10)}...`);
   console.log(`Mensaje: "${message}"`);
   if (link) console.log(`Enlace: ${link}`);
   
   try {
     const api = FacebookAdsApi.init(facebookPageAccessToken);
     if (process.env.NODE_ENV === 'development') {
-      api.setDebug(true); 
+      api.setDebug(true); // Habilita logs detallados del SDK en desarrollo
     }
     
     const pageNode = new FacebookPageSdk(facebookPageId);
@@ -119,47 +121,49 @@ async function publishToFacebookPage(
       params.link = link;
     }
 
-    console.log(`Intentando publicar en Facebook Page ID: ${facebookPageId} via SDK con params:`, params);
+    console.log(`[publishToFacebookPage for "${siteName}"] Llamando a pageNode.createFeed() con params:`, params);
+    // El primer argumento de createFeed son los campos que quieres que devuelva la API. 'id' es el ID del post.
     const response = await pageNode.createFeed(['id'], params); 
     
-    console.log('Respuesta de la API de Facebook (SDK):', response);
+    console.log(`[publishToFacebookPage for "${siteName}"] Respuesta de la API de Facebook (SDK):`, response);
 
     if (response && response.id) {
-      console.log('Publicado exitosamente en Facebook. Post ID:', response.id);
+      console.log(`[publishToFacebookPage for "${siteName}"] Publicado exitosamente en Facebook. Post ID: ${response.id}`);
       return { success: true, postId: response.id };
     } else {
-      console.error('Fallo al publicar en Facebook usando SDK. Respuesta inesperada:', response);
-      const errorMessage = 'Fallo al publicar en Facebook (SDK). Respuesta inesperada de la API.';
-      return { success: false, error: errorMessage };
+      const errorMessage = `[publishToFacebookPage for "${siteName}"] Fallo al publicar en Facebook (SDK). Respuesta inesperada: ${JSON.stringify(response)}`;
+      console.error(errorMessage);
+      return { success: false, error: "Respuesta inesperada de la API de Facebook." };
     }
 
   } catch (apiError: any) {
-    console.error('Error de API de Facebook (SDK):', apiError.message || apiError);
-    let errorMessage = 'Error desconocido al publicar en Facebook (SDK).';
+    let errorMessage = `[publishToFacebookPage for "${siteName}"] Error desconocido al publicar en Facebook (SDK).`;
     
-    // Improved error message extraction from SDK
-    if (apiError.response && apiError.response.error) { // SDK often wraps errors this way
-        errorMessage = apiError.response.error.message || JSON.stringify(apiError.response.error);
+    if (apiError.isAxiosError && apiError.response && apiError.response.data && apiError.response.data.error) { // Error específico del SDK
+        const fbError = apiError.response.data.error;
+        errorMessage = `Error de API de Facebook: ${fbError.message} (Code: ${fbError.code}, Type: ${fbError.type}, FBTrace: ${fbError.fbtrace_id})`;
+        console.error(`[publishToFacebookPage for "${siteName}"] Error detallado de API de Facebook (SDK):`, fbError);
     } else if (apiError.message) {
         errorMessage = apiError.message;
+        console.error(`[publishToFacebookPage for "${siteName}"] Error general de API de Facebook (SDK): ${apiError.message}`, apiError);
+    } else {
+        console.error(`[publishToFacebookPage for "${siteName}"] Error desconocido y no estructurado de API de Facebook (SDK):`, apiError);
     }
     
-    if (errorMessage.toLowerCase().includes("session has expired") || 
-        errorMessage.toLowerCase().includes("invalid oauth access token") ||
-        errorMessage.toLowerCase().includes("error validating access token")) {
+    // Comprobar si el error está relacionado con el token y actualizar el estado del sitio
+    const lowerErrorMessage = errorMessage.toLowerCase();
+    if (lowerErrorMessage.includes("session has expired") || 
+        lowerErrorMessage.includes("invalid oauth access token") ||
+        lowerErrorMessage.includes("error validating access token") ||
+        lowerErrorMessage.includes("permissions error")) { // Añadido "permissions error"
       await updateSite(site.id, { 
         status: 'error', 
-        errorMessage: `Facebook Token Error: ${errorMessage}. Por favor, reconecta la página.`,
-        // Consider clearing the token if it's confirmed invalid
-        // facebookPageAccessToken: undefined, 
-        // facebookPageName: undefined,
-        // facebookPageId: undefined, // Or just the token
+        errorMessage: `Error de Token/Permiso de Facebook: ${errorMessage}. Por favor, reconecta la página.`,
       });
     } else {
-      // For other API errors, just set the site error message
       await updateSite(site.id, {
         status: 'error',
-        errorMessage: `Facebook API Error: ${errorMessage}`,
+        errorMessage: `Error de API de Facebook: ${errorMessage}`,
       });
     }
     return { success: false, error: errorMessage };
@@ -202,27 +206,24 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
   let latestArticle: { title: string; content: string; url: string; };
 
   try {
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] Analizando RSS: ${site.rssFeedUrl}`);
     const feed = await rssParser.parseURL(site.rssFeedUrl);
     if (!feed.items || feed.items.length === 0) {
-      await addLogEntry({
-        siteId: site.id,
-        siteName: site.name,
-        status: 'error',
-        message: `Error al obtener RSS: El feed de ${site.name} está vacío o no contiene artículos.`,
-      });
+      const errorMsg = `Error al obtener RSS: El feed de ${site.name} está vacío o no contiene artículos.`;
+      console.error(`[simulateNewArticleAndPost for "${site.name}"] ${errorMsg}`);
+      await addLogEntry({ siteId: site.id, siteName: site.name, status: 'error', message: errorMsg });
       return { success: false, message: `El feed RSS de ${site.name} está vacío.` };
     }
     
     const firstItem = feed.items[0];
-    // Attempt to get the most complete content available
     const articleContent = firstItem['content:encoded'] || firstItem.content || firstItem.contentSnippet || firstItem.description || 'No content available.';
     
     latestArticle = {
       title: firstItem.title || 'Untitled Article',
-      content: articleContent,
+      content: articleContent.substring(0, 10000), // Limitar la longitud del contenido para la IA
       url: firstItem.link || site.url,
     };
-
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] Artículo RSS obtenido: "${latestArticle.title}"`);
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
@@ -233,8 +234,8 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
     });
 
   } catch (error: any) {
-    console.error('Error al obtener o analizar el feed RSS:', error);
     const errorMessage = error.message || 'Error desconocido al procesar el feed RSS.';
+    console.error(`[simulateNewArticleAndPost for "${site.name}"] Error al obtener o analizar el feed RSS: ${errorMessage}`, error);
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
@@ -258,14 +259,16 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
   try {
     const aiInput: GenerateFacebookPostInput = {
       articleTitle: latestArticle.title,
-      articleContent: latestArticle.content, // Use the full content for better AI results
+      articleContent: latestArticle.content,
       articleUrl: latestArticle.url,
     };
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] Enviando a IA para generar post. Título: ${latestArticle.title}`);
     const aiResult = await generateFacebookPost(aiInput);
     aiGeneratedText = aiResult.facebookPostText;
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] IA generó: "${aiGeneratedText}"`);
   } catch (error) {
-    console.error('Error en Generación de Post con IA:', error);
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido durante la generación con IA.';
+    console.error(`[simulateNewArticleAndPost for "${site.name}"] Error en Generación de Post con IA: ${errorMessage}`, error);
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
@@ -277,34 +280,31 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
     return { success: false, message: `Error de Generación con IA: ${errorMessage}` };
   }
   
+  const logMessageForPosting = `IA Generó: "${aiGeneratedText.substring(0, 100)}...". Intentando publicar en la Página de Facebook: ${site.facebookPageName}...`;
   await addLogEntry({
     siteId: site.id,
     siteName: site.name,
     articleTitle: latestArticle.title,
     articleUrl: latestArticle.url,
     status: 'posting_to_facebook',
-    message: `IA Generó: "${aiGeneratedText}". Intentando publicar en la Página de Facebook: ${site.facebookPageName}...`,
+    message: logMessageForPosting,
   });
   
   const facebookPostResult = await publishToFacebookPage(
-    site, // Pass the whole site object
+    site,
     aiGeneratedText,
     latestArticle.url
   );
 
   if (facebookPostResult.success && facebookPostResult.postId) {
     let facebookPostUrl = '';
-    if (facebookPostResult.postId.includes('_') && !facebookPostResult.postId.startsWith('simulated_fb_post_')) {
-      const ids = facebookPostResult.postId.split('_');
-      if (ids.length >= 2) {
-        const pageIdForUrl = ids[0];
-        const postIdForUrl = ids[1];
-        facebookPostUrl = `https://facebook.com/${pageIdForUrl}/posts/${postIdForUrl}`;
-      } else {
-         facebookPostUrl = `https://facebook.com/${facebookPostResult.postId}`;
-      }
+    // Para posts reales, postId es usualmente pageId_postId o solo postId (el SDK devuelve solo el post_id de la tupla)
+    // El pageId está en site.facebookPageId
+    if (site.facebookPageId && facebookPostResult.postId && !facebookPostResult.postId.startsWith('simulated_fb_post_')) {
+      // El SDK devuelve solo el ID del post (ej: 123456789012345), no pageId_postId
+      // Necesitamos el pageId del sitio para construir la URL completa.
+      facebookPostUrl = `https://facebook.com/${site.facebookPageId}/posts/${facebookPostResult.postId}`;
     } else if (site.facebookPageId && facebookPostResult.postId.startsWith('simulated_fb_post_')) {
-      // Handle simulated posts if facebookPageId is available
        facebookPostUrl = `https://facebook.com/${site.facebookPageId}/posts/${facebookPostResult.postId.replace(/^simulated_fb_post_mock_token_|^simulated_fb_post_appid_missing_/, '')}`;
     }
 
@@ -315,29 +315,27 @@ export async function simulateNewArticleAndPost(siteId: string): Promise<{succes
       articleTitle: latestArticle.title,
       articleUrl: latestArticle.url,
       status: 'posted',
-      message: `Publicado exitosamente: "${aiGeneratedText}"`,
+      message: `Publicado exitosamente: "${aiGeneratedText.substring(0, 100)}..."`,
       facebookPostUrl: facebookPostUrl,
     });
-    // Clear any previous error message on the site upon successful posting
     if (site.status === 'error' && site.errorMessage) {
       await updateSite(site.id, { status: 'monitoring', errorMessage: undefined });
     }
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] Publicación exitosa. URL del Post: ${facebookPostUrl}`);
     return { success: true, message: `Publicado exitosamente en ${site.facebookPageName}.`, log: finalLog };
   } else {
+    const errorMsg = `Error al Publicar en Facebook: ${facebookPostResult.error || 'Error desconocido'}`;
     const errorLog = await addLogEntry({
       siteId: site.id,
       siteName: site.name,
       articleTitle: latestArticle.title,
       articleUrl: latestArticle.url,
       status: 'error',
-      message: `Error al Publicar en Facebook: ${facebookPostResult.error || 'Error desconocido'}`,
+      message: errorMsg,
     });
-    // Update site status to 'error' if posting fails
-    // The publishToFacebookPage function already updates site status for token errors,
-    // but we ensure it's updated for other Facebook API errors here too.
-    if (site.status !== 'error' || site.errorMessage !== `Facebook API Error: ${facebookPostResult.error || 'Unknown error'}`) {
-       await updateSite(site.id, { status: 'error', errorMessage: `Facebook Posting Error: ${facebookPostResult.error || 'Unknown error'}` });
-    }
+    // La función publishToFacebookPage ya actualiza el estado del sitio para errores de token/API.
+    console.error(`[simulateNewArticleAndPost for "${site.name}"] ${errorMsg}`);
     return { success: false, message: `Error al publicar en Facebook: ${facebookPostResult.error || 'Error desconocido'}`, log: errorLog };
   }
 }
+
