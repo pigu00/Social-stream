@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
   }
 
   const facebookAppId = process.env.FACEBOOK_APP_ID;
-  // const facebookAppSecret = process.env.FACEBOOK_APP_SECRET; // No se necesita aquí, solo en el callback
   const redirectUri = process.env.FACEBOOK_REDIRECT_URI;
 
   console.log(`[CONNECT_FB] Iniciando conexión para siteId: ${siteId}`);
@@ -26,7 +25,8 @@ export async function GET(request: NextRequest) {
 
 
   if (!facebookAppId || !redirectUri) {
-    console.error('[CONNECT_FB] Error CRÍTICO: FACEBOOK_APP_ID o FACEBOOK_REDIRECT_URI no están configurados o no son accesibles en el entorno del servidor (process.env). Verifica la configuración de variables de entorno en tu plataforma de despliegue (ej. Netlify).');
+    const errorMessage = `[CONNECT_FB] Error CRÍTICO: FACEBOOK_APP_ID (${facebookAppId ? 'presente' : 'AUSENTE'}) o FACEBOOK_REDIRECT_URI (${redirectUri ? 'presente' : 'AUSENTE'}) no están configurados o no son accesibles en el entorno del servidor (process.env). Verifica la configuración de variables de entorno en tu plataforma de despliegue.`;
+    console.error(errorMessage);
     return redirect('/dashboard?error=facebook_config_missing_in_env&message=Configuracion_de_Facebook_incompleta_en_el_servidor.');
   }
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   // Guardar el token CSRF en una cookie httpOnly y segura
   cookies().set('facebook_csrf_token', csrfToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Será true en Netlify si NODE_ENV es 'production'
+    secure: process.env.NODE_ENV === 'production', 
     path: '/', 
     maxAge: 10 * 60, // 10 minutos en segundos
     sameSite: 'lax',
@@ -49,11 +49,15 @@ export async function GET(request: NextRequest) {
   };
   const state = encodeURIComponent(JSON.stringify(stateObject));
 
-  // Permisos necesarios.
+  // Permisos necesarios (scope):
+  // - pages_show_list: Necesario para obtener la lista de Páginas que administra el usuario.
+  // - pages_manage_posts: Crucial. Permite a la aplicación crear, editar y eliminar publicaciones en nombre de las Páginas que administra el usuario.
+  // - pages_read_engagement: Permite leer contenido y metadatos de la Página, así como insights de la Página. Útil si en el futuro se quiere analizar el rendimiento.
   const scope = 'pages_show_list,pages_manage_posts,pages_read_engagement';
 
   const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${facebookAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}&response_type=code&display=popup`;
   
-  console.log(`[CONNECT_FB] Redirigiendo a URL de autorización de Facebook (sin incluir client_secret ni tokens): ${authUrl.substring(0, authUrl.indexOf('&state=') + 7)}...`); // Log corto para no exponer el estado completo
+  console.log(`[CONNECT_FB] Redirigiendo a URL de autorización de Facebook (sin incluir client_secret ni tokens): ${authUrl.substring(0, authUrl.indexOf('&state=') + 7)}...`);
   return redirect(authUrl);
 }
+
