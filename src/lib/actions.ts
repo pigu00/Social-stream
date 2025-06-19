@@ -287,20 +287,23 @@ export async function simulateNewArticleAndPost(siteIdParam: string): Promise<{s
       articleContent: latestArticle.content,
       articleUrl: latestArticle.url,
     };
-    console.log(`[simulateNewArticleAndPost for "${site.name}"] Enviando a IA para generar post. Título: ${latestArticle.title}`);
+    console.log(`[simulateNewArticleAndPost for "${site.name}"] Enviando a IA para generar post. Título: ${latestArticle.title}. Contenido (primeros 100 chars): ${latestArticle.content.substring(0,100)}...`);
     const aiResult = await generateFacebookPost(aiInput);
     aiGeneratedText = aiResult.facebookPostText;
     console.log(`[simulateNewArticleAndPost for "${site.name}"] IA generó: "${aiGeneratedText}"`);
-  } catch (error) {
+  } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido durante la generación con IA.';
-    console.error(`[simulateNewArticleAndPost for "${site.name}"] Error en Generación de Post con IA: ${errorMessage}`, error);
+    // También es útil registrar el stack trace si está disponible
+    const errorDetails = error instanceof Error ? error.stack : JSON.stringify(error);
+    console.error(`[simulateNewArticleAndPost for "${site.name}"] Error en Generación de Post con IA: ${errorMessage}`, errorDetails);
+    
     await addLogEntry({
       siteId: site.id,
       siteName: site.name,
       articleTitle: latestArticle.title,
       articleUrl: latestArticle.url,
       status: 'error',
-      message: `Error de Generación con IA: ${errorMessage}`,
+      message: `Error de Generación con IA: ${errorMessage.substring(0, 250)}`, // Limitar longitud del mensaje para el log
     });
     return { success: false, message: `Error de Generación con IA: ${errorMessage}` };
   }
